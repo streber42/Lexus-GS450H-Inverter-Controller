@@ -105,7 +105,7 @@ bool htm_sent=0,
      mth_good=0;
 
 
-int Throt1Pin = analogInputToDigitalPin(A0); //throttle pedal analog inputs
+int Throt1Pin = A0; //throttle pedal analog inputs
 int Throt2Pin = A1;
 int ThrotVal=0; //value read from throttle pedal analog input
 bool T15Status; //flag to keep status of Terminal 15 from CAS via CAN.
@@ -117,18 +117,18 @@ short get_torque()
 {
   //accelerator pedal mapping to torque values here
   // ThrotVal=analogRead(Throt2Pin); //75 to 370
-  ThrotVal=digitalRead(Throt1Pin);
+  return analogRead(Throt1Pin);
 //   if (ThrotVal<80) ThrotVal=75;//dead zone at start of throttle travel
 //  if(gear==DRIVE) ThrotVal = map(ThrotVal, 75, 370, 0, 3500);
 //  if(gear==REVERSE) ThrotVal = map(ThrotVal, 75, 370, 0, -3500);
 //  if(gear==PARK) ThrotVal = 0;  //no torque in park or neutral
 //  if(gear==NEUTRAL) ThrotVal = 0;  //no torque in park or neutral
   //  return ThrotVal; //return torque
-  if (ThrotVal == LOW) {
-    return 0;
-  } else {
-    return 1;
-  }
+  // if (ThrotVal == LOW) {
+  //   return 0;
+  // } else {
+  //   return 1;
+  // }
 }
 
 
@@ -182,7 +182,6 @@ void setup() {
   pinMode(TransPB1,INPUT); //Trans inputs
   pinMode(TransPB2,INPUT); //Trans inputs
   pinMode(TransPB3,INPUT); //Trans inputs
-  pinMode(Throt1Pin,INPUT_PULLUP);
   Serial1.begin(250000);
 
   PIOA->PIO_ABSR |= 1<<17;
