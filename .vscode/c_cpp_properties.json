@@ -1,0 +1,77 @@
+{
+    "configurations": [
+        {
+            "name": "!!! WARNING !!! AUTO-GENERATED FILE, PLEASE DO NOT MODIFY IT AND USE https://docs.platformio.org/page/projectconf/section_env_build.html#build-flags"
+        },
+        {
+            "name": "Win32",
+            "includePath": [
+                "c:/Users/murphy/Documents/EV Code/Lexus-GS450H-Inverter-Controller/include",
+                "c:/Users/murphy/Documents/EV Code/Lexus-GS450H-Inverter-Controller/src",
+                "c:/Users/murphy/Documents/EV Code/Lexus-GS450H-Inverter-Controller/.pio/libdeps/evbmw/Wire_EEPROM",
+                "c:/Users/murphy/Documents/EV Code/Lexus-GS450H-Inverter-Controller/.pio/libdeps/evbmw/DueTimer",
+                "c:/Users/murphy/Documents/EV Code/Lexus-GS450H-Inverter-Controller/.pio/libdeps/evbmw/due_wire",
+                "c:/Users/murphy/Documents/EV Code/Lexus-GS450H-Inverter-Controller/.pio/libdeps/evbmw/due_can/src",
+                "c:/Users/murphy/Documents/EV Code/Lexus-GS450H-Inverter-Controller/.pio/libdeps/evbmw/can_common/src",
+                "c:/Users/murphy/Documents/EV Code/Lexus-GS450H-Inverter-Controller/.pio/libdeps/evbmw/Metro-Arduino-Wiring",
+                "C:/Users/murphy/.platformio/packages/framework-arduino-sam/cores/arduino",
+                "C:/Users/murphy/.platformio/packages/framework-arduino-sam/system/libsam",
+                "C:/Users/murphy/.platformio/packages/framework-arduino-sam/system/CMSIS/CMSIS/Include",
+                "C:/Users/murphy/.platformio/packages/framework-arduino-sam/system/CMSIS/Device/ATMEL",
+                "C:/Users/murphy/.platformio/packages/framework-arduino-sam/variants/arduino_due_x",
+                "C:/Users/murphy/.platformio/packages/framework-arduino-sam/libraries/HID/src",
+                "C:/Users/murphy/.platformio/packages/framework-arduino-sam/libraries/SPI/src",
+                "C:/Users/murphy/.platformio/packages/framework-arduino-sam/libraries/Wire/src",
+                "C:/Users/murphy/.platformio/packages/tool-unity",
+                ""
+            ],
+            "browse": {
+                "limitSymbolsToIncludedHeaders": true,
+                "path": [
+                    "c:/Users/murphy/Documents/EV Code/Lexus-GS450H-Inverter-Controller/include",
+                    "c:/Users/murphy/Documents/EV Code/Lexus-GS450H-Inverter-Controller/src",
+                    "c:/Users/murphy/Documents/EV Code/Lexus-GS450H-Inverter-Controller/.pio/libdeps/evbmw/Wire_EEPROM",
+                    "c:/Users/murphy/Documents/EV Code/Lexus-GS450H-Inverter-Controller/.pio/libdeps/evbmw/DueTimer",
+                    "c:/Users/murphy/Documents/EV Code/Lexus-GS450H-Inverter-Controller/.pio/libdeps/evbmw/due_wire",
+                    "c:/Users/murphy/Documents/EV Code/Lexus-GS450H-Inverter-Controller/.pio/libdeps/evbmw/due_can/src",
+                    "c:/Users/murphy/Documents/EV Code/Lexus-GS450H-Inverter-Controller/.pio/libdeps/evbmw/can_common/src",
+                    "c:/Users/murphy/Documents/EV Code/Lexus-GS450H-Inverter-Controller/.pio/libdeps/evbmw/Metro-Arduino-Wiring",
+                    "C:/Users/murphy/.platformio/packages/framework-arduino-sam/cores/arduino",
+                    "C:/Users/murphy/.platformio/packages/framework-arduino-sam/system/libsam",
+                    "C:/Users/murphy/.platformio/packages/framework-arduino-sam/system/CMSIS/CMSIS/Include",
+                    "C:/Users/murphy/.platformio/packages/framework-arduino-sam/system/CMSIS/Device/ATMEL",
+                    "C:/Users/murphy/.platformio/packages/framework-arduino-sam/variants/arduino_due_x",
+                    "C:/Users/murphy/.platformio/packages/framework-arduino-sam/libraries/HID/src",
+                    "C:/Users/murphy/.platformio/packages/framework-arduino-sam/libraries/SPI/src",
+                    "C:/Users/murphy/.platformio/packages/framework-arduino-sam/libraries/Wire/src",
+                    "C:/Users/murphy/.platformio/packages/tool-unity",
+                    ""
+                ]
+            },
+            "defines": [
+                "PLATFORMIO=40301",
+                "__SAM3X8E__",
+                "ARDUINO_ARCH_SAM",
+                "ARDUINO_SAM_DUE",
+                "ARDUINO=10805",
+                "F_CPU=84000000L",
+                "USBCON",
+                "USB_VID=0x2341",
+                "USB_PID=0x003E",
+                "USB_PRODUCT=\"Arduino Due\"",
+                "USB_MANUFACTURER=\"Arduino\"",
+                ""
+            ],
+            "intelliSenseMode": "clang-x64",
+            "cStandard": "c11",
+            "cppStandard": "c++11",
+            "compilerPath": "C:/Users/murphy/.platformio/packages/toolchain-gccarmnoneeabi/bin/arm-none-eabi-gcc.exe",
+            "compilerArgs": [
+                "-mcpu=cortex-m3",
+                "-mthumb",
+                ""
+            ]
+        }
+    ],
+    "version": 4
+}
