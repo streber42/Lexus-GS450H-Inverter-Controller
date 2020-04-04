@@ -58,7 +58,7 @@ CAN_FRAME outframe;  //A structured variable according to due_can library for tr
 
 
 
-/*
+
 byte get_gear()
 {
   if(!digitalRead(IN1))
@@ -70,7 +70,6 @@ byte get_gear()
   return(REVERSE); 
   }
 }
-*/
 
 
 DueTimer timer_htm = DueTimer(0);
@@ -116,19 +115,20 @@ bool can_status;  //flag for turning off and on can sending.
 short get_torque()
 {
   //accelerator pedal mapping to torque values here
-  // ThrotVal=analogRead(Throt2Pin); //75 to 370
-  return analogRead(Throt1Pin);
-//   if (ThrotVal<80) ThrotVal=75;//dead zone at start of throttle travel
-//  if(gear==DRIVE) ThrotVal = map(ThrotVal, 75, 370, 0, 3500);
-//  if(gear==REVERSE) ThrotVal = map(ThrotVal, 75, 370, 0, -3500);
-//  if(gear==PARK) ThrotVal = 0;  //no torque in park or neutral
-//  if(gear==NEUTRAL) ThrotVal = 0;  //no torque in park or neutral
-  //  return ThrotVal; //return torque
-  // if (ThrotVal == LOW) {
-  //   return 0;
-  // } else {
-  //   return 1;
-  // }
+  const int MIN_THROTTLE = 10;
+  const int MAX_THROTTLE = 1024;
+  ThrotVal = analogRead(Throt1Pin); //75 to 370
+  if (ThrotVal <= MIN_THROTTLE)
+    ThrotVal = MIN_THROTTLE; //dead zone at start of throttle travel
+  if (gear == DRIVE)
+    ThrotVal = map(ThrotVal, MIN_THROTTLE, MAX_THROTTLE, 0, 3500);
+  if (gear == REVERSE)
+    ThrotVal = map(ThrotVal, MIN_THROTTLE, MAX_THROTTLE, 0, -3500);
+  if (gear == PARK)
+    ThrotVal = 0; //no torque in park or neutral
+  if (gear == NEUTRAL)
+    ThrotVal = 0;  //no torque in park or neutral
+  return ThrotVal; //return torque
 }
 
 
@@ -153,8 +153,8 @@ void setup() {
     can_status=false;
     RPM=750;
     Gcount=0x0d;
-    gear==NEUTRAL;
-    shiftPos=0xb4; //select neutral
+    gear=get_gear();
+    // shiftPos=0xb4; //select neutral
 //////////////////////////////////////////////   
   pinMode(pin_inv_req, OUTPUT);
   digitalWrite(pin_inv_req, 1);
@@ -213,7 +213,7 @@ void prepare_htm_data()
     mg1_speed = mth_data[6] | mth_data[7] << 8;
     mg2_speed = mth_data[31] | mth_data[32] << 8;
   }
-  //gear=get_gear();
+  gear=get_gear();
   mg2_torque = get_torque(); // -3500 (reverse) to 3500 (forward)
   mg1_torque = ((mg2_torque * 5) / 4);
   if ((mg2_speed > MG2MAXSPEED) || (mg2_speed < -MG2MAXSPEED))
@@ -330,7 +330,8 @@ void diag_mth()
   SerialDEBUG.print("c\nAnother Temp:\t");SerialDEBUG.print(mth_data[88]|mth_data[89]<<8);
   SerialDEBUG.print("c\nAnother Temp:\t");SerialDEBUG.print(mth_data[41]|mth_data[40]<<8);
   SerialDEBUG.print("c\n");
-  SerialDEBUG.println(get_torque());
+  SerialDEBUG.print("Torque requested:\t");SerialDEBUG.println(get_torque());
+  SerialDEBUG.print("Gear: \t");SerialDEBUG.println(gear);
   
   SerialDEBUG.print("\n");
   SerialDEBUG.print("\n");
@@ -373,24 +374,24 @@ void Incoming (CAN_FRAME *frame){
         
         break;
       case 0x80506a:  //park button pressed
-      gear=PARK;
-        shiftPos=0xe1;
+      // gear=PARK;
+      //   shiftPos=0xe1;
         break;
       case 0x800147:  //R position
-      gear=REVERSE;
-        shiftPos=0xd2;
+      // gear=REVERSE;
+      //   shiftPos=0xd2;
         break;
       case 0x80042d: //R+ position
-      gear=NEUTRAL;
-        shiftPos=0xb4; //select Neutral on overpress
+      // gear=NEUTRAL;
+      //   shiftPos=0xb4; //select Neutral on overpress
         break;
       case 0x800259:  //D pressed
-      gear=DRIVE;
-            shiftPos=0x78;
+      // gear=DRIVE;
+      //       shiftPos=0x78;
         break;
       case 0x800374:  //D+ pressed
-      gear=NEUTRAL;
-            shiftPos=0xb4; //select Neutral on overpress.
+      // gear=NEUTRAL;
+      //       shiftPos=0xb4; //select Neutral on overpress.
         break;
       case 0x81006a:  //Left Back button pressed
  
