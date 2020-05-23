@@ -11,6 +11,7 @@
  */
 
 
+#include <Metro.h>
 #include <due_can.h>  //https://github.com/collin80/due_can
 #include <due_wire.h> //https://github.com/collin80/due_wire
 #include <DueTimer.h>  //https://github.com/collin80/DueTimer
@@ -58,7 +59,7 @@ CAN_FRAME outframe;  //A structured variable according to due_can library for tr
 
 
 
-
+/*
 byte get_gear()
 {
   if(!digitalRead(IN1))
@@ -70,13 +71,14 @@ byte get_gear()
   return(REVERSE); 
   }
 }
+*/
 
 
-DueTimer timer_htm = DueTimer(0);
-DueTimer timer_diag = DueTimer(1);
-DueTimer timer_Frames200 = DueTimer(2);
-DueTimer timer_Frames10 = DueTimer(3);
 
+Metro timer_htm=Metro(10); 
+Metro timer_diag = Metro(700);
+Metro timer_Frames200 = Metro(200);
+Metro timer_Frames10 = Metro(10);
 
 byte mth_data[100];
 byte htm_data_setup[80]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0,25,0,0,0,0,0,0,0,128,0,0,0,128,0,0,0,37,1};
@@ -115,30 +117,18 @@ bool can_status;  //flag for turning off and on can sending.
 short get_torque()
 {
   //accelerator pedal mapping to torque values here
-  const int MIN_THROTTLE = 10;
-  const int MAX_THROTTLE = 1024;
-  ThrotVal = analogRead(Throt1Pin); //75 to 370
-  if (ThrotVal <= MIN_THROTTLE)
-    ThrotVal = MIN_THROTTLE; //dead zone at start of throttle travel
-  if (gear == DRIVE)
-    ThrotVal = map(ThrotVal, MIN_THROTTLE, MAX_THROTTLE, 0, 3500);
-  if (gear == REVERSE)
-    ThrotVal = map(ThrotVal, MIN_THROTTLE, MAX_THROTTLE, 0, -3500);
-  if (gear == PARK)
-    ThrotVal = 0; //no torque in park or neutral
-  if (gear == NEUTRAL)
-    ThrotVal = 0;  //no torque in park or neutral
-  return ThrotVal; //return torque
+  ThrotVal=analogRead(Throt1Pin); //75 to 370
+  if (ThrotVal<80) ThrotVal=75;//dead zone at start of throttle travel
+ if(gear==DRIVE) ThrotVal = map(ThrotVal, 75, 370, 0, 3500);
+ if(gear==REVERSE) ThrotVal = map(ThrotVal, 75, 370, 0, -3500);
+ if(gear==PARK) ThrotVal = 0;  //no torque in park or neutral
+ if(gear==NEUTRAL) ThrotVal = 0;  //no torque in park or neutral
+   return ThrotVal; //return torque
 }
 
 
 
-#define SerialDEBUG Serial2
-void Incoming (CAN_FRAME *frame);
-void prepare_htm_data();
-void diag_mth();
-void Frames10MS();
-void Frames200MS();
+#define SerialDEBUG SerialUSB
 
 void setup() {
 
@@ -153,8 +143,8 @@ void setup() {
     can_status=false;
     RPM=750;
     Gcount=0x0d;
-    gear=get_gear();
-    // shiftPos=0xb4; //select neutral
+    gear==NEUTRAL;
+    shiftPos=0xb4; //select neutral
 //////////////////////////////////////////////   
   pinMode(pin_inv_req, OUTPUT);
   digitalWrite(pin_inv_req, 1);
@@ -182,11 +172,12 @@ void setup() {
   pinMode(TransPB1,INPUT); //Trans inputs
   pinMode(TransPB2,INPUT); //Trans inputs
   pinMode(TransPB3,INPUT); //Trans inputs
+
   Serial1.begin(250000);
 
-  // PIOA->PIO_ABSR |= 1<<17;
-  // PIOA->PIO_PDR |= 1<<17;
-  // USART0->US_MR |= 1<<4 | 1<<8 | 1<<18;
+  PIOA->PIO_ABSR |= 1<<17;
+  PIOA->PIO_PDR |= 1<<17;
+  USART0->US_MR |= 1<<4 | 1<<8 | 1<<18;
 
   htm_data[63]=(-5000)&0xFF;  // regen ability of battery
   htm_data[64]=((-5000)>>8);
@@ -194,67 +185,57 @@ void setup() {
   htm_data[65]=(27500)&0xFF;  // discharge ability of battery
   htm_data[66]=((27500)>>8);
  
-  SerialDEBUG.begin(9600);
+  SerialDEBUG.begin(115200);
   SerialDEBUG.print("hello world!");
-    SerialDEBUG.flush();
-
-  timer_htm.attachInterrupt(prepare_htm_data).setFrequency(100).start();
-  timer_diag.attachInterrupt(diag_mth).setPeriod(700000).start();
-  timer_Frames200.attachInterrupt(Frames200MS).setFrequency(5).start();
-  timer_Frames10.attachInterrupt(Frames10MS).setFrequency(100).start();
 }
 
-void prepare_htm_data()
-{
-  SerialDEBUG.println("prepare_htm_data");
-    SerialDEBUG.flush();
-  int speedSum = 0;
-  if (mth_good)
-  {
-    dc_bus_voltage = (((mth_data[82] | mth_data[83] << 8) - 5) / 2);
-    temp_inv_water = (mth_data[42] | mth_data[43] << 8);
-    temp_inv_inductor = (mth_data[86] | mth_data[87] << 8);
-    mg1_speed = mth_data[6] | mth_data[7] << 8;
-    mg2_speed = mth_data[31] | mth_data[32] << 8;
-  }
-  gear=get_gear();
-  mg2_torque = get_torque(); // -3500 (reverse) to 3500 (forward)
-  mg1_torque = ((mg2_torque * 5) / 4);
-  if ((mg2_speed > MG2MAXSPEED) || (mg2_speed < -MG2MAXSPEED))
-    mg2_torque = 0;
-  if (gear == REVERSE)
-    mg1_torque = 0;
-
-  //speed feedback
-  speedSum = mg2_speed + mg1_speed;
-  speedSum /= 113;
-  htm_data[0] = (byte)speedSum;
-  htm_data[75] = (mg1_torque * 4) & 0xFF;
-  htm_data[76] = ((mg1_torque * 4) >> 8);
-
-  //mg1
-  htm_data[5] = (mg1_torque * -1) & 0xFF; //negative is forward
-  htm_data[6] = ((mg1_torque * -1) >> 8);
-  htm_data[11] = htm_data[5];
-  htm_data[12] = htm_data[6];
-
-  //mg2
-  htm_data[26] = (mg2_torque)&0xFF; //positive is forward
-  htm_data[27] = ((mg2_torque) >> 8);
-  htm_data[32] = htm_data[26];
-  htm_data[33] = htm_data[27];
-
-  //checksum
-  htm_checksum = 0;
-  for (byte i = 0; i < 78; i++)
-    htm_checksum += htm_data[i];
-  htm_data[78] = htm_checksum & 0xFF;
-  htm_data[79] = htm_checksum >> 8;
-}
 
 void control_inverter() {
-    SerialDEBUG.println("control_inverter");
 
+  int speedSum=0;
+
+  if(timer_htm.check()) //prepare htm data
+  {
+    if(mth_good)
+    {
+      dc_bus_voltage=(((mth_data[82]|mth_data[83]<<8)-5)/2);
+      temp_inv_water=(mth_data[42]|mth_data[43]<<8);
+      temp_inv_inductor=(mth_data[86]|mth_data[87]<<8);
+      mg1_speed=mth_data[6]|mth_data[7]<<8;
+      mg2_speed=mth_data[31]|mth_data[32]<<8;
+    }
+    //gear=get_gear();
+    mg2_torque=get_torque(); // -3500 (reverse) to 3500 (forward)
+    mg1_torque=((mg2_torque*5)/4);
+    if((mg2_speed>MG2MAXSPEED)||(mg2_speed<-MG2MAXSPEED))mg2_torque=0;
+    if(gear==REVERSE)mg1_torque=0;
+
+    //speed feedback
+    speedSum=mg2_speed+mg1_speed;
+    speedSum/=113;
+    htm_data[0]=(byte)speedSum;
+    htm_data[75]=(mg1_torque*4)&0xFF;
+    htm_data[76]=((mg1_torque*4)>>8);
+    
+    //mg1
+    htm_data[5]=(mg1_torque*-1)&0xFF;  //negative is forward
+    htm_data[6]=((mg1_torque*-1)>>8);
+    htm_data[11]=htm_data[5];
+    htm_data[12]=htm_data[6];
+
+    //mg2
+    htm_data[26]=(mg2_torque)&0xFF; //positive is forward
+    htm_data[27]=((mg2_torque)>>8);
+    htm_data[32]=htm_data[26];
+    htm_data[33]=htm_data[27];
+
+    //checksum
+    htm_checksum=0;
+    for(byte i=0;i<78;i++)htm_checksum+=htm_data[i];
+    htm_data[78]=htm_checksum&0xFF;
+    htm_data[79]=htm_checksum>>8;
+  }
+  
   since_last_packet=micros()-last_packet;
 
   if(since_last_packet>=4000) //read mth
@@ -289,7 +270,6 @@ void control_inverter() {
 
 void diag_mth()
 {
-  SerialDEBUG.println("diag_mth");
   ///mask just hides any MTH data byte which is represented here with a 0. Useful for debug/discovering.
   bool mth_mask[100] = {
     0,0,0,0,0,0,0,0,1,1,
@@ -337,8 +317,6 @@ void diag_mth()
   SerialDEBUG.print("c\nAnother Temp:\t");SerialDEBUG.print(mth_data[88]|mth_data[89]<<8);
   SerialDEBUG.print("c\nAnother Temp:\t");SerialDEBUG.print(mth_data[41]|mth_data[40]<<8);
   SerialDEBUG.print("c\n");
-  SerialDEBUG.print("Torque requested:\t");SerialDEBUG.println(get_torque());
-  SerialDEBUG.print("Gear: \t");SerialDEBUG.println(gear);
   
   SerialDEBUG.print("\n");
   SerialDEBUG.print("\n");
@@ -358,8 +336,7 @@ void diag_mth()
 ///////Handle incomming pt can messages from the car here
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void Incoming (CAN_FRAME *frame){
-    // SerialDEBUG.println("Incoming");
-    // SerialDEBUG.flush();
+
     ///////////Message from CAS on 0x130 byte one for Terminal 15 wakeup
   
       if(frame->id==0x130)
@@ -382,24 +359,24 @@ void Incoming (CAN_FRAME *frame){
         
         break;
       case 0x80506a:  //park button pressed
-      // gear=PARK;
-      //   shiftPos=0xe1;
+      gear=PARK;
+        shiftPos=0xe1;
         break;
       case 0x800147:  //R position
-      // gear=REVERSE;
-      //   shiftPos=0xd2;
+      gear=REVERSE;
+        shiftPos=0xd2;
         break;
       case 0x80042d: //R+ position
-      // gear=NEUTRAL;
-      //   shiftPos=0xb4; //select Neutral on overpress
+      gear=NEUTRAL;
+        shiftPos=0xb4; //select Neutral on overpress
         break;
       case 0x800259:  //D pressed
-      // gear=DRIVE;
-      //       shiftPos=0x78;
+      gear=DRIVE;
+            shiftPos=0x78;
         break;
       case 0x800374:  //D+ pressed
-      // gear=NEUTRAL;
-      //       shiftPos=0xb4; //select Neutral on overpress.
+      gear=NEUTRAL;
+            shiftPos=0xb4; //select Neutral on overpress.
         break;
       case 0x81006a:  //Left Back button pressed
  
@@ -448,98 +425,120 @@ void DashOn(){
 
 
 /////////////Send frames every 10ms and send/rexeive inverter control serial data ///////////////////////////////////////
+
 void Frames10MS()
 {
-    SerialDEBUG.println("Frame10MS");
-    SerialDEBUG.flush();
-
-  if (can_status)
+  if(timer_Frames10.check())
   {
-    if (abs(mg2_speed) > 750)
-    {
-      RPM = abs(mg2_speed);
-    }
-    else
-    {
-      RPM = 750;
-    }
+   
+   if(can_status)
+   {
 
-    word RPM_A; // rpm value for E65
-    RPM_A = RPM * 4;
-    outframe.id = 0x0AA;   // Set our transmission address ID
-    outframe.length = 8;   // Data payload 8 bytes
-    outframe.extended = 0; // Extended addresses - 0=11-bit 1=29bit
-    outframe.rtr = 1;      //No request
-    outframe.data.bytes[0] = 0x5f;
-    outframe.data.bytes[1] = 0x59;
-    outframe.data.bytes[2] = 0xff;
-    outframe.data.bytes[3] = 0x00;
-    outframe.data.bytes[4] = lowByte(RPM_A);
-    outframe.data.bytes[5] = highByte(RPM_A);
-    outframe.data.bytes[6] = 0x80;
-    outframe.data.bytes[7] = 0x99;
-
-    Can1.sendFrame(outframe);
+  if(abs(mg2_speed)>750)
+  {
+    RPM=abs(mg2_speed);
   }
+  else
+  {
+    RPM=750;
+  }
+    
+        word RPM_A;// rpm value for E65
+        RPM_A=RPM*4;
+        outframe.id = 0x0AA;            // Set our transmission address ID
+        outframe.length = 8;            // Data payload 8 bytes
+        outframe.extended = 0;          // Extended addresses - 0=11-bit 1=29bit
+        outframe.rtr=1;                 //No request
+        outframe.data.bytes[0]=0x5f;
+        outframe.data.bytes[1]=0x59;  
+        outframe.data.bytes[2]=0xff;
+        outframe.data.bytes[3]=0x00;
+        outframe.data.bytes[4]=lowByte(RPM_A);
+        outframe.data.bytes[5]=highByte(RPM_A);
+        outframe.data.bytes[6]=0x80;
+        outframe.data.bytes[7]=0x99;
+       
+
+
+        Can1.sendFrame(outframe); 
+
+   }
+  }    
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 ////////////Send these frames every 200ms /////////////////////////////////////////
 void Frames200MS()
 {
-  SerialDEBUG.println("Frame200MS");
-  SerialDEBUG.flush();
-  digitalWrite(13, !digitalRead(13)); //blink led every time we fire this interrrupt.
+  if(timer_Frames200.check())
+  {
+digitalWrite(13,!digitalRead(13));//blink led every time we fire this interrrupt.
 
-  if (can_status)
+  if(can_status)
   {
 
-    ///////////////////////////////////////////////////////////////////////////////////////////////////
-    outframe.id = 0x1D2;               // current selected gear message
-    outframe.length = 5;               // Data payload 5 bytes
-    outframe.extended = 0;             // Extended addresses - 0=11-bit 1=29bit
-    outframe.rtr = 1;                  //No request
-    outframe.data.bytes[0] = shiftPos; //e1=P  78=D  d2=R  b4=N
-    outframe.data.bytes[1] = 0x0c;
-    outframe.data.bytes[2] = 0x8f;
-    outframe.data.bytes[3] = Gcount;
-    outframe.data.bytes[4] = 0xf0;
-    Can1.sendFrame(outframe);
-    ///////////////////////////
-    //Byte 3 is a counter running from 0D through to ED and then back to 0D///
-    //////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////
+        outframe.id = 0x1D2;            // current selected gear message
+        outframe.length = 5;            // Data payload 5 bytes
+        outframe.extended = 0;          // Extended addresses - 0=11-bit 1=29bit
+        outframe.rtr=1;                 //No request
+        outframe.data.bytes[0]=shiftPos;  //e1=P  78=D  d2=R  b4=N
+        outframe.data.bytes[1]=0x0c;  
+        outframe.data.bytes[2]=0x8f;
+        outframe.data.bytes[3]=Gcount;
+        outframe.data.bytes[4]=0xf0;
+        Can1.sendFrame(outframe);
+        ///////////////////////////
+        //Byte 3 is a counter running from 0D through to ED and then back to 0D///
+        //////////////////////////////////////////////
 
-    Gcount = Gcount + 0x10;
-    if (Gcount == 0xED)
-    {
-      Gcount = 0x0D;
-    }
-
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////
+         Gcount=Gcount+0x10;
+         if (Gcount==0xED)
+         {
+          Gcount=0x0D;
+         }
+         
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+  }
   }
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void loop()
-{
-  if ((T15Status == true) && (dash_status == false)) //fire the dash wake up on T15 set to on but do only once.
+
+
+
+
+//Metro timer_diag = Metro(700);
+
+void loop() {
+
+  if((T15Status==true) && (dash_status==false)) //fire the dash wake up on T15 set to on but do only once.
   {
     DashOn();
-    dash_status = true;
-    digitalWrite(InvPower, HIGH); //turn on inverter, oil pump and pas pump
-    analogWrite(OilPumpPWM, 125); //set 50% pwm to oil pump at 1khz for testing
-    can_status = true;
+    dash_status=true;
+    digitalWrite(InvPower,HIGH);  //turn on inverter, oil pump and pas pump
+    analogWrite(OilPumpPWM,125);  //set 50% pwm to oil pump at 1khz for testing
+    can_status=true;
   }
 
-  if ((T15Status == false))
-  {
-    dash_status = false;
-    analogWrite(OilPumpPWM, 0); //set 0 pwm to shutdown
-    can_status = false;
-    digitalWrite(InvPower, LOW); //turn off inverter, oil pump and pas pump
-  }
+    if((T15Status==false))
+    {
+    dash_status=false;
+    analogWrite(OilPumpPWM,0);  //set 0 pwm to shutdown
+    can_status=false;
+    digitalWrite(InvPower,LOW);  //turn off inverter, oil pump and pas pump
 
+      
+    }
+  
   control_inverter();
-  SerialDEBUG.println(Serial.availableForWrite());
-  SerialDEBUG.flush();
+  Frames10MS();
+  Frames200MS();
+  if(timer_diag.check())
+  {
+  diag_mth();
+// SerialDEBUG.println(ThrotVal);
+ //  SerialDEBUG.println(gear);
+ // digitalWrite(13,!digitalRead(13));
+  }
 }
