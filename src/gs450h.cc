@@ -458,9 +458,31 @@ void Frames10MS()
         outframe.data.bytes[6]=0x80;
         outframe.data.bytes[7]=0x99;
        
-
-
         Can1.sendFrame(outframe); 
+
+        outframe.id = 0x001;
+        outframe.length = 6;
+        outframe.extended = 0;
+        outframe.rtr = 1;
+        outframe.data.bytes[0] = mth_data[82];
+        outframe.data.bytes[1] = mth_data[83];
+        outframe.data.bytes[2] = mth_data[42];
+        outframe.data.bytes[3] = mth_data[43];
+        outframe.data.bytes[4] = mth_data[86];
+        outframe.data.bytes[5] = mth_data[87];
+        
+        Can1.sendFrame(outframe);
+
+        outframe.id = 0x002;
+        outframe.length = 4;
+        outframe.extended = 0;
+        outframe.rtr = 1;
+        outframe.data.bytes[0] = mth_data[6];
+        outframe.data.bytes[1] = mth_data[7];
+        outframe.data.bytes[2] = mth_data[31];
+        outframe.data.bytes[3] = mth_data[32];
+        Can1.sendFrame(outframe);
+
 
    }
   }    
