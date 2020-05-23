@@ -112,7 +112,7 @@ int ThrotVal=0; //value read from throttle pedal analog input
 bool T15Status; //flag to keep status of Terminal 15 from CAS via CAN.
 bool dash_status; //flag for dash on can command.
 bool can_status;  //flag for turning off and on can sending.
-     
+void Incoming (CAN_FRAME *frame);
 
 short get_torque()
 {
