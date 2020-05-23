@@ -133,7 +133,7 @@ short get_torque()
 
 
 
-#define SerialDEBUG SerialUSB
+#define SerialDEBUG Serial2
 void Incoming (CAN_FRAME *frame);
 void prepare_htm_data();
 void diag_mth();
@@ -184,9 +184,9 @@ void setup() {
   pinMode(TransPB3,INPUT); //Trans inputs
   Serial1.begin(250000);
 
-  PIOA->PIO_ABSR |= 1<<17;
-  PIOA->PIO_PDR |= 1<<17;
-  USART0->US_MR |= 1<<4 | 1<<8 | 1<<18;
+  // PIOA->PIO_ABSR |= 1<<17;
+  // PIOA->PIO_PDR |= 1<<17;
+  // USART0->US_MR |= 1<<4 | 1<<8 | 1<<18;
 
   htm_data[63]=(-5000)&0xFF;  // regen ability of battery
   htm_data[64]=((-5000)>>8);
@@ -194,8 +194,10 @@ void setup() {
   htm_data[65]=(27500)&0xFF;  // discharge ability of battery
   htm_data[66]=((27500)>>8);
  
-  SerialDEBUG.begin(115200);
+  SerialDEBUG.begin(9600);
   SerialDEBUG.print("hello world!");
+    SerialDEBUG.flush();
+
   timer_htm.attachInterrupt(prepare_htm_data).setFrequency(100).start();
   timer_diag.attachInterrupt(diag_mth).setPeriod(700000).start();
   timer_Frames200.attachInterrupt(Frames200MS).setFrequency(5).start();
@@ -204,6 +206,8 @@ void setup() {
 
 void prepare_htm_data()
 {
+  SerialDEBUG.println("prepare_htm_data");
+    SerialDEBUG.flush();
   int speedSum = 0;
   if (mth_good)
   {
@@ -249,6 +253,8 @@ void prepare_htm_data()
 }
 
 void control_inverter() {
+    SerialDEBUG.println("control_inverter");
+
   since_last_packet=micros()-last_packet;
 
   if(since_last_packet>=4000) //read mth
@@ -283,6 +289,7 @@ void control_inverter() {
 
 void diag_mth()
 {
+  SerialDEBUG.println("diag_mth");
   ///mask just hides any MTH data byte which is represented here with a 0. Useful for debug/discovering.
   bool mth_mask[100] = {
     0,0,0,0,0,0,0,0,1,1,
@@ -351,7 +358,8 @@ void diag_mth()
 ///////Handle incomming pt can messages from the car here
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void Incoming (CAN_FRAME *frame){
-
+    // SerialDEBUG.println("Incoming");
+    // SerialDEBUG.flush();
     ///////////Message from CAS on 0x130 byte one for Terminal 15 wakeup
   
       if(frame->id==0x130)
@@ -442,6 +450,9 @@ void DashOn(){
 /////////////Send frames every 10ms and send/rexeive inverter control serial data ///////////////////////////////////////
 void Frames10MS()
 {
+    SerialDEBUG.println("Frame10MS");
+    SerialDEBUG.flush();
+
   if (can_status)
   {
     if (abs(mg2_speed) > 750)
@@ -476,6 +487,8 @@ void Frames10MS()
 ////////////Send these frames every 200ms /////////////////////////////////////////
 void Frames200MS()
 {
+  SerialDEBUG.println("Frame200MS");
+  SerialDEBUG.flush();
   digitalWrite(13, !digitalRead(13)); //blink led every time we fire this interrrupt.
 
   if (can_status)
@@ -527,5 +540,6 @@ void loop()
   }
 
   control_inverter();
-  // SerialDEBUG.println(get_torque());
+  SerialDEBUG.println(Serial.availableForWrite());
+  SerialDEBUG.flush();
 }
