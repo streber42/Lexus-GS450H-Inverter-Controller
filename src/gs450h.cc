@@ -131,7 +131,7 @@ short get_torque()
 #define SerialDEBUG SerialUSB
 
 void setup() {
-
+   Can0.begin(CAN_BPS_500K);
    Can1.begin(CAN_BPS_500K);  //CAN bus for communication with E65 PT CAN
    Can1.watchForRange(0x130, 0x192);  // only receive messages from 0x130 to 0x192
    Can1.attachCANInterrupt(Incoming); //
@@ -187,6 +187,8 @@ void setup() {
  
   SerialDEBUG.begin(115200);
   SerialDEBUG.print("hello world!");
+  mth_data[82] = 32;
+  mth_data[83] = 3;
 }
 
 
@@ -238,20 +240,20 @@ void control_inverter() {
   
   since_last_packet=micros()-last_packet;
 
-  if(since_last_packet>=4000) //read mth
-  {    
-    htm_sent=0;
-    mth_byte=0;
-    mth_checksum=0;
+  // if(since_last_packet>=4000) //read mth
+  // {    
+  //   htm_sent=0;
+  //   mth_byte=0;
+  //   mth_checksum=0;
     
-    for(int i=0;i<100;i++)mth_data[i]=0;
-    while(Serial1.available()){mth_data[mth_byte]=Serial1.read();mth_byte++;}
+  //   for(int i=0;i<100;i++)mth_data[i]=0;
+  //   while(Serial1.available()){mth_data[mth_byte]=Serial1.read();mth_byte++;}
     
-    for(int i=0;i<98;i++)mth_checksum+=mth_data[i];
-    if(mth_checksum==(mth_data[98]|(mth_data[99]<<8)))mth_good=1;else mth_good=0;
-    last_packet=micros();
-    digitalWrite(pin_inv_req,0);
-  }
+  //   for(int i=0;i<98;i++)mth_checksum+=mth_data[i];
+  //   if(mth_checksum==(mth_data[98]|(mth_data[99]<<8)))mth_good=1;else mth_good=0;
+  //   last_packet=micros();
+  //   digitalWrite(pin_inv_req,0);
+  // }
 
   since_last_packet=micros()-last_packet;
   
@@ -280,7 +282,7 @@ void diag_mth()
     1,1,1,1,1,0,0,0,0,0,
     0,0,0,0,0,0,0,0,0,0,
     0,0,0,0,0,0,0,0,0,0,
-    1,1,0,0,1,1,0,0,1,1,
+    1,1,1,1,1,1,0,0,1,1,
     1,1,1,1,1,1,1,1,0,0,};
     
   SerialDEBUG.print("\n");
@@ -426,65 +428,61 @@ void DashOn(){
 
 /////////////Send frames every 10ms and send/rexeive inverter control serial data ///////////////////////////////////////
 
-void Frames10MS()
-{
-  if(timer_Frames10.check())
-  {
-   
-   if(can_status)
-   {
-
-  if(abs(mg2_speed)>750)
-  {
-    RPM=abs(mg2_speed);
-  }
-  else
-  {
-    RPM=750;
-  }
+void Frames10MS() {
+  if(timer_Frames10.check()) {
+   if(can_status) {
+    if(abs(mg2_speed)>750) {
+      RPM=abs(mg2_speed); 
+    } else {
+      RPM=750;
+    }
     
-        word RPM_A;// rpm value for E65
-        RPM_A=RPM*4;
-        outframe.id = 0x0AA;            // Set our transmission address ID
-        outframe.length = 8;            // Data payload 8 bytes
-        outframe.extended = 0;          // Extended addresses - 0=11-bit 1=29bit
-        outframe.rtr=1;                 //No request
-        outframe.data.bytes[0]=0x5f;
-        outframe.data.bytes[1]=0x59;  
-        outframe.data.bytes[2]=0xff;
-        outframe.data.bytes[3]=0x00;
-        outframe.data.bytes[4]=lowByte(RPM_A);
-        outframe.data.bytes[5]=highByte(RPM_A);
-        outframe.data.bytes[6]=0x80;
-        outframe.data.bytes[7]=0x99;
-       
-        Can1.sendFrame(outframe); 
-
-        outframe.id = 0x001;
-        outframe.length = 6;
-        outframe.extended = 0;
-        outframe.rtr = 1;
-        outframe.data.bytes[0] = mth_data[82];
-        outframe.data.bytes[1] = mth_data[83];
-        outframe.data.bytes[2] = mth_data[42];
-        outframe.data.bytes[3] = mth_data[43];
-        outframe.data.bytes[4] = mth_data[86];
-        outframe.data.bytes[5] = mth_data[87];
-        
-        Can1.sendFrame(outframe);
-
-        outframe.id = 0x002;
-        outframe.length = 4;
-        outframe.extended = 0;
-        outframe.rtr = 1;
-        outframe.data.bytes[0] = mth_data[6];
-        outframe.data.bytes[1] = mth_data[7];
-        outframe.data.bytes[2] = mth_data[31];
-        outframe.data.bytes[3] = mth_data[32];
-        Can1.sendFrame(outframe);
-
-
+    word RPM_A;// rpm value for E65
+    RPM_A=RPM*4;
+    outframe.id = 0x0AA;            // Set our transmission address ID
+    outframe.length = 8;            // Data payload 8 bytes
+    outframe.extended = 0;          // Extended addresses - 0=11-bit 1=29bit
+    outframe.rtr=1;                 //No request
+    outframe.data.bytes[0]=0x5f;
+    outframe.data.bytes[1]=0x59;  
+    outframe.data.bytes[2]=0xff;
+    outframe.data.bytes[3]=0x00;
+    outframe.data.bytes[4]=lowByte(RPM_A);
+    outframe.data.bytes[5]=highByte(RPM_A);
+    outframe.data.bytes[6]=0x80;
+    outframe.data.bytes[7]=0x99;
+    Can1.sendFrame(outframe); 
    }
+
+    outframe.id = 0x001;
+    outframe.length = 6;
+    outframe.extended = 0;
+    outframe.rtr = 1;
+    outframe.data.bytes[0] = mth_data[82];
+    outframe.data.bytes[1] = mth_data[83];
+    outframe.data.bytes[2] = mth_data[42];
+    outframe.data.bytes[3] = mth_data[43];
+    outframe.data.bytes[4] = mth_data[86];
+    outframe.data.bytes[5] = mth_data[87];
+    // mth_data[82] = (mth_data[82] + 1) % 255;
+    // mth_data[83] = (mth_data[83] + 1) % 255;
+    // uint16_t num = outframe.data.uint16[0];
+    // num = num + 1;
+    // outframe.data.uint16[0]++;
+    // mth_data[82] = outframe.data.bytes[0];
+    // mth_data[83] = outframe.data.bytes[1];
+
+    Can0.sendFrame(outframe);
+
+    outframe.id = 0x002;
+    outframe.length = 4;
+    outframe.extended = 0;
+    outframe.rtr = 1;
+    outframe.data.bytes[0] = mth_data[6];
+    outframe.data.bytes[1] = mth_data[7];
+    outframe.data.bytes[2] = mth_data[31];
+    outframe.data.bytes[3] = mth_data[32];
+    Can0.sendFrame(outframe);
   }    
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -494,6 +492,8 @@ void Frames200MS()
 {
   if(timer_Frames200.check())
   {
+    mth_data[82]++;
+
 digitalWrite(13,!digitalRead(13));//blink led every time we fire this interrrupt.
 
   if(can_status)
@@ -559,8 +559,11 @@ void loop() {
   if(timer_diag.check())
   {
   diag_mth();
+  dc_bus_voltage=(((mth_data[82]|mth_data[83]<<8)-5)/2);
 // SerialDEBUG.println(ThrotVal);
  //  SerialDEBUG.println(gear);
  // digitalWrite(13,!digitalRead(13));
+  // mth_data[82]++;
+//  mth_data[83]++;
   }
 }
