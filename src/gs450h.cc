@@ -301,7 +301,7 @@ void diag_mth()
   SerialDEBUG.print("\n");
     
   SerialDEBUG.print("MTH Valid: ");if(mth_good)SerialDEBUG.print("Yes"); else SerialDEBUG.print("No");SerialDEBUG.print("\tChecksum: ");SerialDEBUG.print(mth_checksum);
-  SerialDEBUG.print("\n");
+  SerialDEBUG.print("\n"); 
   
   SerialDEBUG.print("DC Bus: ");if(dc_bus_voltage>=0)SerialDEBUG.print(dc_bus_voltage);else SerialDEBUG.print("----");
   SerialDEBUG.print("v\n");
@@ -454,34 +454,17 @@ void Frames10MS() {
     Can1.sendFrame(outframe); 
    }
 
+    // Send powetrain data ever 10ms
     outframe.id = 0x001;
     outframe.length = 6;
     outframe.extended = 0;
     outframe.rtr = 1;
     outframe.data.bytes[0] = mth_data[82];
     outframe.data.bytes[1] = mth_data[83];
-    outframe.data.bytes[2] = mth_data[42];
-    outframe.data.bytes[3] = mth_data[43];
-    outframe.data.bytes[4] = mth_data[86];
-    outframe.data.bytes[5] = mth_data[87];
-    // mth_data[82] = (mth_data[82] + 1) % 255;
-    // mth_data[83] = (mth_data[83] + 1) % 255;
-    // uint16_t num = outframe.data.uint16[0];
-    // num = num + 1;
-    // outframe.data.uint16[0]++;
-    // mth_data[82] = outframe.data.bytes[0];
-    // mth_data[83] = outframe.data.bytes[1];
-
-    Can0.sendFrame(outframe);
-
-    outframe.id = 0x002;
-    outframe.length = 4;
-    outframe.extended = 0;
-    outframe.rtr = 1;
-    outframe.data.bytes[0] = mth_data[6];
-    outframe.data.bytes[1] = mth_data[7];
-    outframe.data.bytes[2] = mth_data[31];
-    outframe.data.bytes[3] = mth_data[32];
+    outframe.data.bytes[2] = mth_data[6];
+    outframe.data.bytes[3] = mth_data[7];
+    outframe.data.bytes[4] = mth_data[31];
+    outframe.data.bytes[5] = mth_data[32];
     Can0.sendFrame(outframe);
   }    
 }
@@ -522,6 +505,20 @@ digitalWrite(13,!digitalRead(13));//blink led every time we fire this interrrupt
          
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
   }
+  // Send temps every 200ms
+  outframe.id = 0x002;
+  outframe.length = 8;
+  outframe.extended = 0;
+  outframe.rtr = 1;
+  outframe.data.bytes[0] = mth_data[42];
+  outframe.data.bytes[1] = mth_data[43];
+  outframe.data.bytes[2] = mth_data[86];
+  outframe.data.bytes[3] = mth_data[87];
+  outframe.data.bytes[4] = mth_data[88];
+  outframe.data.bytes[5] = mth_data[89];
+  outframe.data.bytes[6] = mth_data[40];
+  outframe.data.bytes[7] = mth_data[41];
+  Can0.sendFrame(outframe);
   }
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
