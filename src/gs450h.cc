@@ -1,8 +1,7 @@
-/*Basic software to run the Lexus GS450H hybrid transmission and inverter using the open source V1 controller
+/*Basic software to run the Lexus GS450H hybrid transmission and inverter using the open source V1 or V2 controller
  * Take an analog throttle signal and converts to a torque command to MG1 and MG2
  * Feedback provided over USB serial
- * V3 Reverse added
- * V4 CAN specific to BMW E65 735i project
+ * V3.01 simple menu system via usb uart added.
  * 
  * Copyright 2019 T.Darby , D.Maguire
  * openinverter.org
@@ -11,11 +10,10 @@
  */
 
 
-#include <due_can.h>  //https://github.com/collin80/due_can
-#include <due_wire.h> //https://github.com/collin80/due_wire
-#include <DueTimer.h>  //https://github.com/collin80/DueTimer
-#include <Wire_EEPROM.h> //https://github.com/collin80/Wire_EEPROM
-
+#include <Metro.h>
+#include "variant.h"
+#include <due_wire.h>
+#include <Wire_EEPROM.h>
 
 #define MG2MAXSPEED 10000
 #define pin_inv_req 22
@@ -35,7 +33,6 @@
 
 #define IN1   6
 #define IN2   7
-#define Brake_In   62
 
 #define TransPB1    40
 #define TransPB2    43
@@ -46,37 +43,34 @@
 #define MG1Temp A5
 #define MG2Temp A6
 
-////////////////Global variables ////////////////////////////////////////////////////////////
-word RPM;
-byte  Gcount; //gear display counter byte
-unsigned int GLeaver;  //unsigned int to contain result of message 0x192. Gear selector lever position
-int shiftPos; //contains byte to display gear position on dash
-byte gear;
-byte mthCnt;
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CAN_FRAME outframe;  //A structured variable according to due_can library for transmitting CAN data.
+#define EEPROM_VERSION      11
 
-
-
+void SetPumpSpeed();
+float readThermistor(int adc);
+void Cal_torque_D();
+void Cal_torque_R();
+void Cal_minthrottle();
+void Cal_maxthrottle();
+void PrintRawData();
 
 byte get_gear()
 {
-  if(!digitalRead(IN1))
+  if(digitalRead(IN1))
   {
   return(DRIVE);
   }
-  else
+  else if(digitalRead(IN2))
   {
   return(REVERSE); 
+  }
+  else
+  {
+  return(NEUTRAL); 
   }
 }
 
 
-DueTimer timer_htm = DueTimer(0);
-DueTimer timer_diag = DueTimer(1);
-DueTimer timer_Frames200 = DueTimer(2);
-DueTimer timer_Frames10 = DueTimer(3);
-
+Metro timer_htm=Metro(10); 
 
 byte mth_data[100];
 byte htm_data_setup[80]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0,25,0,0,0,0,0,0,0,128,0,0,0,128,0,0,0,37,1};
@@ -97,71 +91,68 @@ short mg1_torque=0,
       mg1_speed=-1,
       mg2_speed=-1;
        
-byte inv_status=1;
-     //gear=get_gear(); //get this from your transmission
+byte inv_status=1,
+     gear=get_gear(); //get this from your transmission
      
 bool htm_sent=0, 
      mth_good=0;
 
+int oil_power=120; //oil pump pwm value
 
+float Version=3.01;
+char incomingByte;
 int Throt1Pin = A0; //throttle pedal analog inputs
 int Throt2Pin = A1;
 int ThrotVal=0; //value read from throttle pedal analog input
-bool T15Status; //flag to keep status of Terminal 15 from CAS via CAN.
-bool dash_status; //flag for dash on can command.
-bool can_status;  //flag for turning off and on can sending.
+
+/////////////temp sensor data////////////////////
+float vcc = 5.0;
+float adc_step = 3.3/1023.0;
+float Rtop = 1800.0;
+float Ro = 47000;
+float To = 25+273;
+float B = 3500;
+float mg1_stat=0;
+float mg2_stat=0;
+////////////////////////////////////////////////////
+
+typedef struct
+{
+uint8_t  version; //eeprom version stored
+int Max_Drive_Torque=0;
+int Max_Reverse_Torque=0;
+unsigned int Min_throttleVal=0;
+unsigned int Max_throttleVal=0;
+unsigned int PumpPWM=0;
+bool  selGear=HIGH;
+}ControlParams;
      
+ControlParams parameters;
 
 short get_torque()
 {
   //accelerator pedal mapping to torque values here
-  const int MIN_THROTTLE = 10;
-  const int MAX_THROTTLE = 1024;
-  ThrotVal = analogRead(Throt1Pin); //75 to 370
-  if (ThrotVal <= MIN_THROTTLE)
-    ThrotVal = MIN_THROTTLE; //dead zone at start of throttle travel
-  if (gear == DRIVE)
-    ThrotVal = map(ThrotVal, MIN_THROTTLE, MAX_THROTTLE, 0, 3500);
-  if (gear == REVERSE)
-    ThrotVal = map(ThrotVal, MIN_THROTTLE, MAX_THROTTLE, 0, -3500);
-  if (gear == PARK)
-    ThrotVal = 0; //no torque in park or neutral
-  if (gear == NEUTRAL)
-    ThrotVal = 0;  //no torque in park or neutral
+  ThrotVal=analogRead(Throt1Pin);
+  if (ThrotVal<parameters.Min_throttleVal+10) ThrotVal=parameters.Min_throttleVal;//dead zone at start of throttle travel
+ if(gear==DRIVE) ThrotVal = map(ThrotVal, parameters.Min_throttleVal, parameters.Max_throttleVal, 0, parameters.Max_Drive_Torque);
+ if(gear==REVERSE) ThrotVal = map(ThrotVal, parameters.Min_throttleVal, parameters.Max_throttleVal, 0, -parameters.Max_Reverse_Torque);
+ if(gear==NEUTRAL) ThrotVal = 0;//no torque in neutral
   return ThrotVal; //return torque
 }
 
 
 
-#define SerialDEBUG Serial2
-void Incoming (CAN_FRAME *frame);
-void prepare_htm_data();
-void diag_mth();
-void Frames10MS();
-void Frames200MS();
+#define SerialDEBUG SerialUSB
+ template<class T> inline Print &operator <<(Print &obj, T arg) { obj.print(arg); return obj; } //Allow streaming
 
 void setup() {
-
-   Can1.begin(CAN_BPS_500K);  //CAN bus for communication with E65 PT CAN
-   Can1.watchForRange(0x130, 0x192);  // only receive messages from 0x130 to 0x192
-   Can1.attachCANInterrupt(Incoming); //
-//   Timer4.attachInterrupt(Frames10MS).start(10000); // Send frames every 10ms
-//   Timer3.attachInterrupt(Frames200MS).start(200000); // Send frames every 200ms
- //set initial conditions/////////////////
-    T15Status=false;
-    dash_status=false;
-    can_status=false;
-    RPM=750;
-    Gcount=0x0d;
-    gear=get_gear();
-    // shiftPos=0xb4; //select neutral
-//////////////////////////////////////////////   
+  
   pinMode(pin_inv_req, OUTPUT);
   digitalWrite(pin_inv_req, 1);
   pinMode(13, OUTPUT);  //led
   pinMode(OilPumpPower, OUTPUT);  //Oil pump control relay
   digitalWrite(OilPumpPower,HIGH);  //turn on oil pump 12v power supply.
-   //analogWrite(OilPumpPWM,125);  //set 50% pwm to oil pump at 1khz for testing
+   analogWrite(OilPumpPWM,125);  //set 50% pwm to oil pump at 1khz for testing
 
   pinMode(InvPower, OUTPUT);  //Inverter Relay 
   pinMode(Out1, OUTPUT);  //GP output one
@@ -169,7 +160,7 @@ void setup() {
   pinMode(TransSL2,OUTPUT); //Trans solenoids
   pinMode(TransSP,OUTPUT); //Trans solenoids
 
-  digitalWrite(InvPower,LOW);  //turn off at startup
+  digitalWrite(InvPower,HIGH);  //turn on at startup
   digitalWrite(Out1,LOW);  //turn off at startup
   digitalWrite(TransSL1,LOW);  //turn off at startup
   digitalWrite(TransSL2,LOW);  //turn off at startup
@@ -177,16 +168,16 @@ void setup() {
 
   pinMode(IN1,INPUT); //Input 1
   pinMode(IN2,INPUT); //Input 2
-  pinMode(Brake_In,INPUT); //Brake pedal input
 
   pinMode(TransPB1,INPUT); //Trans inputs
   pinMode(TransPB2,INPUT); //Trans inputs
   pinMode(TransPB3,INPUT); //Trans inputs
+
   Serial1.begin(250000);
 
-  // PIOA->PIO_ABSR |= 1<<17;
-  // PIOA->PIO_PDR |= 1<<17;
-  // USART0->US_MR |= 1<<4 | 1<<8 | 1<<18;
+  PIOA->PIO_ABSR |= 1<<17;
+  PIOA->PIO_PDR |= 1<<17;
+  USART0->US_MR |= 1<<4 | 1<<8 | 1<<18;
 
   htm_data[63]=(-5000)&0xFF;  // regen ability of battery
   htm_data[64]=((-5000)>>8);
@@ -194,67 +185,121 @@ void setup() {
   htm_data[65]=(27500)&0xFF;  // discharge ability of battery
   htm_data[66]=((27500)>>8);
  
-  SerialDEBUG.begin(9600);
-  SerialDEBUG.print("hello world!");
-    SerialDEBUG.flush();
+  SerialDEBUG.begin(115200);
+  Serial2.begin(19200); //setup serial 2 for wifi access
 
-  timer_htm.attachInterrupt(prepare_htm_data).setFrequency(100).start();
-  timer_diag.attachInterrupt(diag_mth).setPeriod(700000).start();
-  timer_Frames200.attachInterrupt(Frames200MS).setFrequency(5).start();
-  timer_Frames10.attachInterrupt(Frames10MS).setFrequency(100).start();
-}
-
-void prepare_htm_data()
-{
-  SerialDEBUG.println("prepare_htm_data");
-    SerialDEBUG.flush();
-  int speedSum = 0;
-  if (mth_good)
+   Wire.begin();
+  EEPROM.read(0, parameters);
+  if (parameters.version != EEPROM_VERSION)
   {
-    dc_bus_voltage = (((mth_data[82] | mth_data[83] << 8) - 5) / 2);
-    temp_inv_water = (mth_data[42] | mth_data[43] << 8);
-    temp_inv_inductor = (mth_data[86] | mth_data[87] << 8);
-    mg1_speed = mth_data[6] | mth_data[7] << 8;
-    mg2_speed = mth_data[31] | mth_data[32] << 8;
+    parameters.version = EEPROM_VERSION;
+    parameters.Max_Drive_Torque=0;
+    parameters.Max_Reverse_Torque=0;
+    parameters.Min_throttleVal=0;
+    parameters.Max_throttleVal=0;
+    parameters.PumpPWM=0;
+    EEPROM.write(0, parameters);
   }
-  gear=get_gear();
-  mg2_torque = get_torque(); // -3500 (reverse) to 3500 (forward)
-  mg1_torque = ((mg2_torque * 5) / 4);
-  if ((mg2_speed > MG2MAXSPEED) || (mg2_speed < -MG2MAXSPEED))
-    mg2_torque = 0;
-  if (gear == REVERSE)
-    mg1_torque = 0;
-
-  //speed feedback
-  speedSum = mg2_speed + mg1_speed;
-  speedSum /= 113;
-  htm_data[0] = (byte)speedSum;
-  htm_data[75] = (mg1_torque * 4) & 0xFF;
-  htm_data[76] = ((mg1_torque * 4) >> 8);
-
-  //mg1
-  htm_data[5] = (mg1_torque * -1) & 0xFF; //negative is forward
-  htm_data[6] = ((mg1_torque * -1) >> 8);
-  htm_data[11] = htm_data[5];
-  htm_data[12] = htm_data[6];
-
-  //mg2
-  htm_data[26] = (mg2_torque)&0xFF; //positive is forward
-  htm_data[27] = ((mg2_torque) >> 8);
-  htm_data[32] = htm_data[26];
-  htm_data[33] = htm_data[27];
-
-  //checksum
-  htm_checksum = 0;
-  for (byte i = 0; i < 78; i++)
-    htm_checksum += htm_data[i];
-  htm_data[78] = htm_checksum & 0xFF;
-  htm_data[79] = htm_checksum >> 8;
+ 
 }
+
+void handle_wifi(){
+/*
+ * 
+ * Routine to send data to wifi on serial 2
+The information will be provided over serial to the esp8266 at 19200 baud 8n1 in the form :
+vxxx,ixxx,pxxx,mxxxx,nxxxx,oxxx,rxxx,qxxx* where :
+
+v=pack voltage (0-700Volts)
+i=current (0-1000Amps)
+p=power (0-300kw)
+m=mg1 rpm (0-10000rpm)
+n=mg2 rpm (0-10000rpm)
+o=mg1 temp (-20 to 120C)
+r=mg2 temp (-20 to 120C)
+q=oil pressure (0-100%)
+*=end of string
+xxx=three digit integer for each parameter eg p100 = 100kw.
+updates will be every 100ms approx.
+
+v100,i200,p35,m3000,n4000,o20,r100,q50*
+*/
+  
+//Serial2.print("v100,i200,p35,m3000,n4000,o20,r30,q50*"); //test string
+
+digitalWrite(13,!digitalRead(13));//blink led every time we fire this interrrupt.
+
+Serial2.print("v");//dc bus voltage
+Serial2.print(dc_bus_voltage);//voltage derived from Lexus inverter
+Serial2.print(",i");//dc current
+//Serial2.print(Sensor.Amperes);//current derived from ISA shunt
+Serial2.print(0);
+Serial2.print(",p");//total motor power
+//Serial2.print(Sensor.KW);//Power value derived from ISA Shunt
+Serial2.print(0);
+Serial2.print(",m");//mg1 rpm
+Serial2.print(abs(mg1_speed));
+Serial2.print(",n");//mg2 rpm
+Serial2.print(abs(mg2_speed));
+Serial2.print(",o");//mg1 temp. Using water temp for now
+Serial2.print(temp_inv_water);
+Serial2.print(",r");//mg2 temp. Using water temp for now
+Serial2.print(temp_inv_water);
+Serial2.print(",q");// pwm percent on oil pump
+Serial2.print(parameters.PumpPWM);// disply oil pump speed in %.
+Serial2.print("*");// end of data indicator
+
+}
+
+
+
 
 void control_inverter() {
-    SerialDEBUG.println("control_inverter");
 
+  int speedSum=0;
+
+  if(timer_htm.check()) //prepare htm data
+  {
+    if(mth_good)
+    {
+      dc_bus_voltage=(((mth_data[82]|mth_data[83]<<8)-5)/2);
+      temp_inv_water=(mth_data[42]|mth_data[43]<<8);
+      temp_inv_inductor=(mth_data[86]|mth_data[87]<<8);
+      mg1_speed=mth_data[6]|mth_data[7]<<8;
+      mg2_speed=mth_data[31]|mth_data[32]<<8;
+    }
+    gear=get_gear();
+    mg2_torque=get_torque(); // -3500 (reverse) to 3500 (forward)
+    mg1_torque=((mg2_torque*5)/4);
+    if((mg2_speed>MG2MAXSPEED)||(mg2_speed<-MG2MAXSPEED))mg2_torque=0;
+    if(gear==REVERSE)mg1_torque=0;
+
+    //speed feedback
+    speedSum=mg2_speed+mg1_speed;
+    speedSum/=113;
+    htm_data[0]=(byte)speedSum;
+    htm_data[75]=(mg1_torque*4)&0xFF;
+    htm_data[76]=((mg1_torque*4)>>8);
+    
+    //mg1
+    htm_data[5]=(mg1_torque*-1)&0xFF;  //negative is forward
+    htm_data[6]=((mg1_torque*-1)>>8);
+    htm_data[11]=htm_data[5];
+    htm_data[12]=htm_data[6];
+
+    //mg2
+    htm_data[26]=(mg2_torque)&0xFF; //positive is forward
+    htm_data[27]=((mg2_torque)>>8);
+    htm_data[32]=htm_data[26];
+    htm_data[33]=htm_data[27];
+
+    //checksum
+    htm_checksum=0;
+    for(byte i=0;i<78;i++)htm_checksum+=htm_data[i];
+    htm_data[78]=htm_checksum&0xFF;
+    htm_data[79]=htm_checksum>>8;
+  }
+  
   since_last_packet=micros()-last_packet;
 
   if(since_last_packet>=4000) //read mth
@@ -289,7 +334,6 @@ void control_inverter() {
 
 void diag_mth()
 {
-  SerialDEBUG.println("diag_mth");
   ///mask just hides any MTH data byte which is represented here with a 0. Useful for debug/discovering.
   bool mth_mask[100] = {
     0,0,0,0,0,0,0,0,1,1,
@@ -337,8 +381,6 @@ void diag_mth()
   SerialDEBUG.print("c\nAnother Temp:\t");SerialDEBUG.print(mth_data[88]|mth_data[89]<<8);
   SerialDEBUG.print("c\nAnother Temp:\t");SerialDEBUG.print(mth_data[41]|mth_data[40]<<8);
   SerialDEBUG.print("c\n");
-  SerialDEBUG.print("Torque requested:\t");SerialDEBUG.println(get_torque());
-  SerialDEBUG.print("Gear: \t");SerialDEBUG.println(gear);
   
   SerialDEBUG.print("\n");
   SerialDEBUG.print("\n");
@@ -352,194 +394,273 @@ void diag_mth()
   SerialDEBUG.print("\n");
 }
 
+/////////////////////////////////////////////////////////////////////////////////
+//Serial menu system
+////////////////////////////////////////////////////////////////////////////////
 
 
-/////////////////////////////////////////////////////////////////////////////////////////////////////
-///////Handle incomming pt can messages from the car here
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void Incoming (CAN_FRAME *frame){
-    // SerialDEBUG.println("Incoming");
-    // SerialDEBUG.flush();
-    ///////////Message from CAS on 0x130 byte one for Terminal 15 wakeup
+
+void printMenu()
+{
+   SerialDEBUG<<"\f\n=========== EVBMW GS450H VCU Version "<<Version<<" ==============\n************ List of Available Commands ************\n\n";
+   SerialDEBUG<<"  ?  - Print this menu\n ";
+   SerialDEBUG<<"  d - Print recieved data from inverter\n";
+   SerialDEBUG<<"  D - Print configuration data\n";
+   SerialDEBUG<<"  f  - Calibrate minimum throttle.\n ";
+   SerialDEBUG<<"  g  - Calibrate maximum throttle.\n ";
+   SerialDEBUG<<"  i  - Set max drive torque (0-3500) e.g. typing i200 followed by enter sets max drive torque to 200\n ";
+   SerialDEBUG<<"  q  - Set max reverse torque (0-3500) e.g. typing q200 followed by enter sets max reverse torque to 200\n ";
+   SerialDEBUG<<"  v  - Set gearbox oil pump speed (0-100%) e.g. typing v50 followed by enter sets oil pump to 50% speed\n ";
+   SerialDEBUG<<"  a  - Select LOW gear.\n ";
+   SerialDEBUG<<"  s  - Select HIGH gear.\n ";
+   SerialDEBUG<<"  z  - Save configuration data to EEPROM memory\n ";
+   
+   SerialDEBUG<<"**************************************************************\n==============================================================\n\n";
+   
+}
+
+void checkforinput()
+{ 
+  //Checks for keyboard input from Native port 
+   if (SerialDEBUG.available()) 
+     {
+      int inByte = SerialDEBUG.read();
+      switch (inByte)
+         {
+          case 'z':            
+          EEPROM.write(0, parameters);
+           SerialDEBUG.print("Parameters stored to EEPROM");
+            break;
   
-      if(frame->id==0x130)
-      {
-        if(frame->data.byte[0] == 0x45) T15Status=true; //if the cas sends 0x45 in byte 0 of id 0x130 we have a run command
-        else T15Status=false;
-      }
-      
-      
- ////////////////////////////////////////////////////////////////////////////////////////////////////////////////     
+          case 'f':    
+            Cal_minthrottle();
+            break;
+            
+          case 'g':    
+            Cal_maxthrottle();
+            break;
 
-  //////////////////////Decode gear selector , update inverter and display back onto cluster in car.
-      if(frame->id==0x192)
-      {
-      GLeaver=frame->data.low;
-      GLeaver=GLeaver&0x00ffffff; //mask off byte 3
-     // Serial.println(GLeaver,HEX);
-    switch (GLeaver) {
-      case 0x80006a:  //not pressed
         
-        break;
-      case 0x80506a:  //park button pressed
-      // gear=PARK;
-      //   shiftPos=0xe1;
-        break;
-      case 0x800147:  //R position
-      // gear=REVERSE;
-      //   shiftPos=0xd2;
-        break;
-      case 0x80042d: //R+ position
-      // gear=NEUTRAL;
-      //   shiftPos=0xb4; //select Neutral on overpress
-        break;
-      case 0x800259:  //D pressed
-      // gear=DRIVE;
-      //       shiftPos=0x78;
-        break;
-      case 0x800374:  //D+ pressed
-      // gear=NEUTRAL;
-      //       shiftPos=0xb4; //select Neutral on overpress.
-        break;
-      case 0x81006a:  //Left Back button pressed
- 
-        break;
-      case 0x82006a:  //Left Front button pressed
- 
-        break;
-      case 0x84006a:  //right Back button pressed
- 
-        break;
-
-      case 0x88006a:  //right Front button pressed
- 
-        break;
-
-      case 0xa0006a:  //  S-M-D button pressed
- 
-        break;        
-      default:
-      {
+          case 'd':     //Print data received from inverter
+             diag_mth();
+            break;
+            
+          case 'D':     //Print out the raw ADC throttle value
+                PrintRawData();
+            break;
+          
+          case 'i':     
+              Cal_torque_D();
+            break;
+          case 'q':     
+              Cal_torque_R();
+            break;
+          case 'v':     
+              SetPumpSpeed();
+            break;            
+           
+          case '?':     //Print a menu describing these functions
+              printMenu();
+            break;
+            
+          case 'a':     
+          parameters.selGear=0;
+      SerialDEBUG.println("LOW Gear Selected");      
+            break; 
         
+         case 's':     
+          parameters.selGear=1;
+     SerialDEBUG.println("HIGH Gear Selected");           
+            break;
+         
+          }    
       }
-      }
-      }
-    }
+}
 
-/////////////////this can id must be sent once at T15 on to fire up the instrument cluster/////////////////////////
-void DashOn(){
 
-        outframe.id = 0x332;            // dash on message
-        outframe.length = 2;            // Data payload 2 bytes
-        outframe.extended = 0;          // standard id
-        outframe.rtr=1;                 //No request
-        outframe.data.bytes[0]=0x61;  //sets max rpm on tach (temp thing)
-        outframe.data.bytes[1]=0x82;  
-        Can1.sendFrame(outframe);
+
+//////////////////////////////////////////////////////////////////////////////
+
+void PrintRawData()
+{
+  SerialDEBUG.println("");
+  SerialDEBUG.println("***************************************************************************************************");
+  SerialDEBUG.print("Throttle Channel 1: ");
+  SerialDEBUG.println(analogRead(Throt1Pin));
+  SerialDEBUG.print("Throttle Channel 2: ");
+  SerialDEBUG.println(analogRead(Throt2Pin));
+  SerialDEBUG.print("Commanded Torque: ");
+  SerialDEBUG.println(ThrotVal);
+  SerialDEBUG.print("Selected Direction: ");
+  if (get_gear()==1) SerialDEBUG.println("REVERSE");
+  if (get_gear()==2) SerialDEBUG.println("NEUTRAL");
+  if (get_gear()==3) SerialDEBUG.println("DRIVE");
+  SerialDEBUG.print("Selected Gear: ");
+  if(parameters.selGear) SerialDEBUG.println("HIGH");
+  if(!parameters.selGear) SerialDEBUG.println("LOW"); 
+  SerialDEBUG.print("Configured Max Drive Torque: ");
+  SerialDEBUG.println(parameters.Max_Drive_Torque); 
+  SerialDEBUG.print("Configured Max Reverse Torque: ");
+  SerialDEBUG.println(parameters.Max_Reverse_Torque); 
+  SerialDEBUG.print("Configured gearbox oil pump speed: ");
+  SerialDEBUG.println(parameters.PumpPWM);
+  SerialDEBUG.println("Current valve positions: ");
+  if(digitalRead(TransPB1))
+  {
+  SerialDEBUG.println("PB1:ON");
+  }
+  else
+  {
+  SerialDEBUG.println("PB1:OFF");
+  }
+
+  if(digitalRead(TransPB2))
+  {
+  SerialDEBUG.println("PB2:ON");
+  }
+  else
+  {
+  SerialDEBUG.println("PB2:OFF");
+  }
+
+   if(digitalRead(TransPB3))
+  {
+  SerialDEBUG.println("PB3:ON");
+  }
+  else
+  {
+  SerialDEBUG.println("PB3:OFF");
+  }
+  SerialDEBUG.print("MG1 Stator temp: ");
+  SerialDEBUG.println(mg1_stat);
+  SerialDEBUG.print("MG2 Stator temp: ");
+  SerialDEBUG.println(mg2_stat);
+  SerialDEBUG.println("***************************************************************************************************");  
+}
+
+///////////////////Throttle pedal calibration//////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////
+
+void Cal_minthrottle()
+{
+  SerialDEBUG.println("");
+     SerialDEBUG.print("Configured min throttle value: ");
+     parameters.Min_throttleVal=(analogRead(Throt1Pin));
+     if(parameters.Min_throttleVal<0) parameters.Min_throttleVal=0;//noting lower than 0 for min.
+     SerialDEBUG.println(parameters.Min_throttleVal);
+}
+
+void Cal_maxthrottle()
+{
+  SerialDEBUG.println("");
+   SerialDEBUG.print("Configured max throttle value: ");
+   parameters.Max_throttleVal=(analogRead(Throt1Pin));
+   if (parameters.Max_throttleVal>1000) parameters.Max_throttleVal=1000;//limit on max value
+   SerialDEBUG.println(parameters.Max_throttleVal);
+   
+}
+//////////////////////////////////////////////////////////////////////////////////////////
+
+
+//////////Torque calibration//////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////
+void Cal_torque_D()
+{
+  SerialDEBUG.println("");
+   SerialDEBUG.print("Configured drive torque: ");
+     if (SerialDEBUG.available()) {
+    parameters.Max_Drive_Torque = SerialDEBUG.parseInt();
+  }
+  if(parameters.Max_Drive_Torque>3500) parameters.Max_Drive_Torque=3500;//limit max drive torque to within range
+  SerialDEBUG.println(parameters.Max_Drive_Torque); 
+  }
+
+void Cal_torque_R()
+{
+  SerialDEBUG.println("");
+   SerialDEBUG.print("Configured reverse torque: ");
+     if (SerialDEBUG.available()) {
+    parameters.Max_Reverse_Torque = SerialDEBUG.parseInt();  
+  }
+  if(parameters.Max_Reverse_Torque>3500) parameters.Max_Reverse_Torque=3500;//limit max reverse torque to within range
+  SerialDEBUG.println(parameters.Max_Reverse_Torque); 
+  }
   
-    
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////
 
 
-
-    
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-/////////////Send frames every 10ms and send/rexeive inverter control serial data ///////////////////////////////////////
-void Frames10MS()
+void SetPumpSpeed()
 {
-    SerialDEBUG.println("Frame10MS");
-    SerialDEBUG.flush();
-
-  if (can_status)
-  {
-    if (abs(mg2_speed) > 750)
-    {
-      RPM = abs(mg2_speed);
-    }
-    else
-    {
-      RPM = 750;
-    }
-
-    word RPM_A; // rpm value for E65
-    RPM_A = RPM * 4;
-    outframe.id = 0x0AA;   // Set our transmission address ID
-    outframe.length = 8;   // Data payload 8 bytes
-    outframe.extended = 0; // Extended addresses - 0=11-bit 1=29bit
-    outframe.rtr = 1;      //No request
-    outframe.data.bytes[0] = 0x5f;
-    outframe.data.bytes[1] = 0x59;
-    outframe.data.bytes[2] = 0xff;
-    outframe.data.bytes[3] = 0x00;
-    outframe.data.bytes[4] = lowByte(RPM_A);
-    outframe.data.bytes[5] = highByte(RPM_A);
-    outframe.data.bytes[6] = 0x80;
-    outframe.data.bytes[7] = 0x99;
-
-    Can1.sendFrame(outframe);
+  SerialDEBUG.println("");
+   SerialDEBUG.print("Configured gearbox oil pump speed: ");
+        if (SerialDEBUG.available()) {
+    parameters.PumpPWM = SerialDEBUG.parseInt();
+  if(parameters.PumpPWM>100) parameters.PumpPWM=100; //limit to max 100%
+  if(parameters.PumpPWM<0) parameters.PumpPWM=0;//limit to 0
   }
-}
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  SerialDEBUG.println(parameters.PumpPWM); 
+  }
 
-////////////Send these frames every 200ms /////////////////////////////////////////
-void Frames200MS()
+void changeGear()
 {
-  SerialDEBUG.println("Frame200MS");
-  SerialDEBUG.flush();
-  digitalWrite(13, !digitalRead(13)); //blink led every time we fire this interrrupt.
-
-  if (can_status)
-  {
-
-    ///////////////////////////////////////////////////////////////////////////////////////////////////
-    outframe.id = 0x1D2;               // current selected gear message
-    outframe.length = 5;               // Data payload 5 bytes
-    outframe.extended = 0;             // Extended addresses - 0=11-bit 1=29bit
-    outframe.rtr = 1;                  //No request
-    outframe.data.bytes[0] = shiftPos; //e1=P  78=D  d2=R  b4=N
-    outframe.data.bytes[1] = 0x0c;
-    outframe.data.bytes[2] = 0x8f;
-    outframe.data.bytes[3] = Gcount;
-    outframe.data.bytes[4] = 0xf0;
-    Can1.sendFrame(outframe);
-    ///////////////////////////
-    //Byte 3 is a counter running from 0D through to ED and then back to 0D///
-    //////////////////////////////////////////////
-
-    Gcount = Gcount + 0x10;
-    if (Gcount == 0xED)
-    {
-      Gcount = 0x0D;
-    }
-
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////
-  }
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-void loop()
+if (mg2_speed<100 && mg1_speed<100) //only shift at very low rpm (ideally 0 but leave a little play)
 {
-  if ((T15Status == true) && (dash_status == false)) //fire the dash wake up on T15 set to on but do only once.
-  {
-    DashOn();
-    dash_status = true;
-    digitalWrite(InvPower, HIGH); //turn on inverter, oil pump and pas pump
-    analogWrite(OilPumpPWM, 125); //set 50% pwm to oil pump at 1khz for testing
-    can_status = true;
-  }
 
-  if ((T15Status == false))
-  {
-    dash_status = false;
-    analogWrite(OilPumpPWM, 0); //set 0 pwm to shutdown
-    can_status = false;
-    digitalWrite(InvPower, LOW); //turn off inverter, oil pump and pas pump
-  }
+  if(parameters.selGear)    //high gear
+{
+digitalWrite(TransSL1,LOW);
+digitalWrite(TransSL2,LOW);
+digitalWrite(TransSP,LOW);    //yes we are leaving them all off for initial proof of this version.
+}
 
+  if(!parameters.selGear)   //low gear
+{
+digitalWrite(TransSL1,LOW);
+digitalWrite(TransSL2,LOW);
+digitalWrite(TransSP,LOW);
+}
+  
+}
+
+}
+
+
+void processTemps()
+{
+mg1_stat=readThermistor(analogRead(MG1Temp));
+mg2_stat=readThermistor(analogRead(MG2Temp));
+  
+}
+
+
+
+//////////////Dilbert's temp sensor routine////////////////////////////
+float readThermistor(int adc){
+
+
+float raw = adc;
+float voltage = raw*adc_step;
+
+float Rt = (voltage * Rtop)/(vcc-voltage);
+
+float temp = (1/(1.0/To + (1.0/B)*log(Rt/Ro)))-273;
+
+return temp;
+}
+///////////////////////////////////////////////////////////////////////
+
+Metro timer_diag = Metro(1100);
+
+void loop() {
+  
   control_inverter();
-  SerialDEBUG.println(Serial.availableForWrite());
-  SerialDEBUG.flush();
+
+  if(timer_diag.check())
+  {
+  changeGear();  
+  processTemps();
+   handle_wifi();
+analogWrite(OilPumpPWM,map(parameters.PumpPWM, 0, 100, 0, 255)); //set oil pump pwm
+  }
+    checkforinput(); //Check keyboard for user input 
 }

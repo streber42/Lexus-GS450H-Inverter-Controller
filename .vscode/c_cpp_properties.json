@@ -1,10 +1,12 @@
+//
+// !!! WARNING !!! AUTO-GENERATED FILE!
+// PLEASE DO NOT MODIFY IT AND USE "platformio.ini":
+// https://docs.platformio.org/page/projectconf/section_env_build.html#build-flags
+//
 {
     "configurations": [
         {
-            "name": "!!! WARNING !!! AUTO-GENERATED FILE, PLEASE DO NOT MODIFY IT AND USE https://docs.platformio.org/page/projectconf/section_env_build.html#build-flags"
-        },
-        {
-            "name": "Win32",
+            "name": "PlatformIO",
             "includePath": [
                 "c:/Users/murphy/Documents/EV Code/Lexus-GS450H-Inverter-Controller/include",
                 "c:/Users/murphy/Documents/EV Code/Lexus-GS450H-Inverter-Controller/src",
@@ -49,9 +51,8 @@
                 ]
             },
             "defines": [
-                "PLATFORMIO=40301",
+                "PLATFORMIO=50101",
                 "__SAM3X8E__",
-                "ARDUINO_ARCH_SAM",
                 "ARDUINO_SAM_DUE",
                 "ARDUINO=10805",
                 "F_CPU=84000000L",
@@ -60,9 +61,9 @@
                 "USB_PID=0x003E",
                 "USB_PRODUCT=\"Arduino Due\"",
                 "USB_MANUFACTURER=\"Arduino\"",
+                "ARDUINO_ARCH_SAM",
                 ""
             ],
-            "intelliSenseMode": "clang-x64",
             "cStandard": "c11",
             "cppStandard": "c++11",
             "compilerPath": "C:/Users/murphy/.platformio/packages/toolchain-gccarmnoneeabi/bin/arm-none-eabi-gcc.exe",
