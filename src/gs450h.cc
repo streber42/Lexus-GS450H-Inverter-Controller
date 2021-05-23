@@ -14,6 +14,7 @@
 #include "variant.h"
 #include <due_wire.h>
 #include <Wire_EEPROM.h>
+#include <due_can.h>
 
 #define MG2MAXSPEED 10000
 #define pin_inv_req 22
@@ -103,7 +104,7 @@ float Version=3.01;
 char incomingByte;
 int Throt1Pin = A0; //throttle pedal analog inputs
 int Throt2Pin = A1;
-int ThrotVal=0; //value read from throttle pedal analog input
+uint16_t ThrotVal=0; //value read from throttle pedal analog input
 
 /////////////temp sensor data////////////////////
 float vcc = 5.0;
@@ -115,6 +116,165 @@ float B = 3500;
 float mg1_stat=0;
 float mg2_stat=0;
 ////////////////////////////////////////////////////
+CAN_FRAME outframe;  //A structured variable according to due_can library for transmitting CAN data.
+
+static uint8_t counter_329 = 0;
+static uint8_t ABSMsg = 0;
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//these messages go out on vehicle can and are specific to driving the E46 instrument cluster etc.
+
+//////////////////////DME Messages //////////////////////////////////////////////////////////
+void Can_E46_Msg316(uint16_t speed_input)
+{
+    // Limit tachometer range from 750 RPMs - 7000 RPMs at max.
+    // These limits ensure the vehicle thinks engine is alive and within the
+    // max allowable RPM.
+    // FIXME: Verify if this is true, or is the Terminal 15 bit which is
+    //        more important.
+    // Comparison uses ternary operator.
+    speed_input = (speed_input < 750) ? 750 : speed_input;
+    speed_input = (speed_input > 7000) ? 7000 : speed_input;
+
+    uint8_t rpm_to_can_mult = 64;
+    uint8_t rpm_to_can_div = 10;
+
+    uint8_t canRPMlo = ((speed_input * rpm_to_can_mult) / rpm_to_can_div) & 0xFF;
+    uint8_t canRPMhi = ((speed_input * rpm_to_can_mult) / rpm_to_can_div) >> 8;
+
+    // Declare data frame array.
+    outframe.id = 0x316;
+    outframe.length = 8;
+    outframe.extended = 0;
+    outframe.rtr = 1;
+
+    // Byte 0 - Status - 0x01 is Terminal 15 Status, 0x04 is Traction Control OK
+    outframe.data.bytes[0]=0x05;
+    // Byte 1 - Torque with all interventions
+    outframe.data.bytes[1]=0x00;
+    // Byte 2 / 3 "Engine" RPM, RPM * 6.4. 16 bits, Intel LSB (LSB,MSB)
+    outframe.data.bytes[2]=canRPMlo;  //RPM LSB
+    outframe.data.bytes[3]=canRPMhi;  //RPM MSB
+    // Byte 4 - Driver Desired Torque
+    outframe.data.bytes[4]=0x00;
+    // Byte 5 - Friction Torque
+    outframe.data.bytes[5]=0x00;
+    // Byte 6 - Various other status bits
+    outframe.data.bytes[6]=0x00;
+    // Byte 7 - Torque with internal interventions only
+    outframe.data.bytes[7]=0x00;
+    Can0.sendFrame(outframe);
+
+
+    // Can::GetInterface(1)->Send(0x316, (uint32_t*)bytes,8); //Send on CAN2
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void Can_E46_Msg329(uint16_t tempValue)
+{
+    //********************temp sense  *******************************
+    //  tempValue=analogRead(tempIN); //read Analog pin voltage
+    //  The sensor and gauge are not linear.  So if the sensed
+    //  Voltage is less than the mid point the Map function
+    //  is used to map the input values to output values For the gauge
+    //  output values (in decimal):
+    //  86 = First visible movment of needle starts
+    //  93 = Begining of Blue section
+    //  128 = End of Blue Section
+    //  169 = Begin Straight up
+    //  193 = Midpoint of needle straight up values
+    //  219 = Needle begins to move from center
+    //  230 = Beginning of Red section
+    //  254 = needle pegged to the right
+    //  MAP program statement: map(value, fromLow, fromHigh, toLow, toHigh)
+    //  if(tempValue < 964){  //if pin voltage < mid point value
+    //      tempValue= inverter_status.inverter_temperature;  //read temp from leaf inverter can.
+    //      tempValue= map(tempValue,15,80,88,254); //Map to e46 temp gauge
+    //  }
+    //  else
+    //  {
+    //      tempValue= map(tempValue,964,1014,219,254); //Map upper half of range
+    //  }
+
+    //Can bus data packet values to be sent
+    // MSG 0x329
+
+    // Declare data frame array.
+    outframe.id = 0x329;
+    outframe.length = 8;
+    outframe.extended = 0;
+    outframe.rtr = 1;
+
+    // Byte 0 - Bits 6-7 Multiplexer ID, Bits 0-5 Data
+    outframe.data.bytes[0]=ABSMsg;  //needs to cycle 11,86,d9
+    // Byte 1 - Coolant Temperature
+    outframe.data.bytes[1]=0x00;//tempValue; //temp bit tdata
+    // Byte 2 - Atmospheric Pressure in mbar
+    outframe.data.bytes[2]=0xc5;
+    // Byte 3 - Status bits - 0x10 Engine running,
+    //          0x08 Coolant Temp > 60 deg C (Warmup bit), Other bits include
+    //          cruise control bits.
+    outframe.data.bytes[3]=0x00;
+    // Byte 4 - Cruise control desired relative torque, 0-99.6% (0-254)
+    outframe.data.bytes[4]=0x00;
+    // Byte 5 - Driver desired relative torque, 0-99.6% (0-254)
+    //          Max of driver or cruise desired value.
+    outframe.data.bytes[5]=0x00;
+    // Byte 6 - 0x01 Brake Pedal pressed, 0x02 Brake Light Switch error,
+    //          0x04 Kickdown, 0x08 Cruise Enabled
+    outframe.data.bytes[6]=0x00;
+    // Byte 7 - Zero, or -1 (255)
+    outframe.data.bytes[7]=0x00;
+
+    counter_329++;
+    if(counter_329 >= 22) counter_329 = 0;
+    if(counter_329==0) ABSMsg=0x11;
+    if(counter_329==8) ABSMsg=0x86;
+    if(counter_329==15) ABSMsg=0xd9;
+    Can0.sendFrame(outframe);
+
+    // Can::GetInterface(1)->Send(0x329, (uint32_t*)bytes,8); //Send on CAN2
+}
+
+void Can_E46_Msg545()
+{
+    // int z = 0x60; // + y;  higher value lower MPG
+
+    // Data sent to instrument cluster. Status and slow moving data.
+    // Fuel consumption is fuel usage (since start) in uL % 65536.
+
+    //MSG 0x545
+    //Can bus data packet values to be sent
+    outframe.id = 0x545;
+    outframe.length = 8;
+    outframe.extended = 0;
+    outframe.rtr = 1;
+
+    // Byte 0 - 2 Check Engine, 8 Cruise Enabled , 0x10 EML, 0x40 Gas Cap
+    outframe.data.bytes[0]=0x00;
+    // Byte 1 - Fuel consumption LSB
+    outframe.data.bytes[1]=0x00;
+    // Byte 2 - Fuel consumption MSB
+    outframe.data.bytes[2]=0x00;
+    // Byte 3 - 0x08 Overheat, Yellow Oil Level 0x02, M3 cluster shift lights
+    outframe.data.bytes[3]=0x00;
+    // Byte 4 - Oil Temperature
+    outframe.data.bytes[4]=0x7E;
+    // Byte 5 - Battery light, 0x01.
+    outframe.data.bytes[5]=0x10;
+    // Byte 6 - Unused
+    outframe.data.bytes[6]=0x00;
+    // Byte 7 - 0x80 Oil Pressure (Red Oil light), Idle set speed
+    outframe.data.bytes[7]=0x18;
+    Can0.sendFrame(outframe);
+
+    // Can::GetInterface(1)->Send(0x545, (uint32_t*)bytes,8); //Send on CAN2
+}
+
+
 
 typedef struct
 {
@@ -129,7 +289,7 @@ bool  selGear=HIGH;
      
 ControlParams parameters;
 
-short get_torque()
+uint16_t get_torque()
 {
   //accelerator pedal mapping to torque values here
   ThrotVal=analogRead(Throt1Pin);
@@ -144,6 +304,10 @@ short get_torque()
 
 #define SerialDEBUG SerialUSB
  template<class T> inline Print &operator <<(Print &obj, T arg) { obj.print(arg); return obj; } //Allow streaming
+
+void Incoming (CAN_FRAME *frame){
+  SerialDEBUG.println("id:" + frame->id);
+}
 
 void setup() {
   
@@ -187,6 +351,9 @@ void setup() {
  
   SerialDEBUG.begin(115200);
   Serial2.begin(19200); //setup serial 2 for wifi access
+
+   Can0.begin(CAN_BPS_500K);  //BMW Can bus
+   Can0.attachCANInterrupt(Incoming); //
 
    Wire.begin();
   EEPROM.read(0, parameters);
@@ -650,10 +817,15 @@ return temp;
 ///////////////////////////////////////////////////////////////////////
 
 Metro timer_diag = Metro(1100);
+Metro timer_can = Metro(100);
 
 void loop() {
-  
   control_inverter();
+  if (timer_can.check()) {
+    Can_E46_Msg316(mg2_speed);
+    Can_E46_Msg329(temp_inv_inductor);
+    Can_E46_Msg545();
+  }
 
   if(timer_diag.check())
   {
